@@ -15,7 +15,6 @@
 	   crossorigin=""></script>
 </head>
 <body>
-
 	<div id="loader"></div>
 
 	<h1>Hoe zag jouw straat er vroeger uit?</h1>
@@ -23,30 +22,39 @@
 	<section class="options">
 		<h2 id="street-name">Amsterdam</h2>
 
+		<!-- Original search -->
+
+		<form class="search" action="#">
+			<div class="autocomplete">
+				<input type="search" name="searchbar" value="" placeholder="Zoek een straat..." autocomplete="off">
+			</div>
+		</form>
+
+		<!-- Fancy search -->
+
+		<!-- <form class="search" action="#">
+			<input id="searchbar" type="search" name="searchbar" value="" placeholder="Zoek een straat...">
+			<label class="result" for="searchbar">achter oosteinde</label>
+		</form> -->
+
+		<div class="timeline--container">
+			<ul class="timeline"></ul>
+		</div>
+
 		<div class="images--container">
-			<button type="button" class="close-btn">
+			<button type="button" class="close-btn" aria-label="Sluit dit venster">
 				<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px" viewBox="0 0 500 500">
 					<rect x="237.5" y="0" transform="matrix(0.7071 -0.7071 0.7071 0.7071 -103.5534 250)" width="25" height="500"/>
 					<rect x="0" y="237.5" transform="matrix(0.7071 -0.7071 0.7071 0.7071 -103.5534 250)" width="500" height="25"/>
 				</svg>
 			</button>
 			<ul></ul>
-		</div>
-
-		<div class="timeline--container">
-			<ul class="timeline"></ul>
-		</div>
-
-		<form class="search">
-			<input type="search" name="searchbar" value="" placeholder="Zoek een straat...">
-			<ul class="results"></ul>
-		</form>
+		</div>	
 	</section>
 
 	<div id="map"></div>
 
 	<script src="js/wellknown.js"></script>
 	<script type="text/javascript" src="js/script.js"></script>
-
 </body>
 </html>
