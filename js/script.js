@@ -61,20 +61,27 @@
 					var rows = data.results.bindings;
 
 					var streets = rows.map(function (item) {
+
+						var streetName = item.name.value;
+						var link = item.street.value;
+						var slug = link.slice((link.indexOf('street/') + 7), link.lastIndexOf('/'));
+						var geo = item.wkt.value;
+
 						return {
 							'type': 'Feature',
 							'properties': {
-								'streetName': item.name.value,
-								'link': item.street.value
+								'streetName': streetName,
+								'slug': slug,
+								'link': link
 							},
-							'geometry': wellknown(item.wkt.value)
+							'geometry': wellknown(geo)
 						};
 					});
 
 					loader.hide();
-					search.searchbar.show();
-					search.init(streets);
 					map.renderStreets(streets);
+					options.main.show();
+					options.search.init(streets);
 
 				})
 				.catch(function (error) {
@@ -119,13 +126,32 @@
 							years[idx].images.push(item.img);
 						});
 
-						timeline.addCurrentYears(years);
+						options.timeline.addCurrentYears(years);
 
 					})
 					.catch(function (error) {
 						// if there is any error you will catch them here
 						console.log(error);
 					});
+		}
+	};
+
+	var events = {
+		handleClickOnStreet: function (street) {
+
+			var latlng;
+
+			if (street.geometry.type === 'Point') {
+				latlng = street.geometry.coordinates;
+			} else {
+				latlng = street.geometry.coordinates[0][0];
+			}
+
+			api.getStreetDetails(street.properties.link);
+			map.setCurrentView(latlng[1], latlng[0]);
+			map.highlightStreet(street.properties.slug);
+			options.title.addStreetName(street.properties.streetName);
+			options.timeline.container.show();
 		}
 	};
 
@@ -138,7 +164,7 @@
 			// Set the original view of the map:
 			this.map.setView([52.370216, 4.895168], 13);
 
-			L.tileLayer('https://api.mapbox.com/styles/v1/maxdevries95/cjefrwpkc4w0a2sn7e6lroutx/tiles/256/{z}/{x}/{y}?access_token=' + this.mapboxAccessToken, {
+			L.tileLayer('https://api.mapbox.com/styles/v1/maxdevries95/cjesmtkaj8iqs2rmoe0bo17w7/tiles/256/{z}/{x}/{y}?access_token=' + this.mapboxAccessToken, {
 				maxZoom: 20,
 				attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors, <a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery © <a href="http://mapbox.com">Mapbox</a>',
 				id: 'mapbox.streets'
@@ -156,187 +182,261 @@
 			};
 
 			L.geoJSON(data, {
+				style: function (feature) {
+					return {
+						weight: 1,
+						lineCap: 'square',
+						lineJoin: 'square',
+						className: feature.properties.slug
+					}
+				},
 				pointToLayer: function (feature, latlng) { return L.circleMarker(latlng, geojsonMarkerOptions); }
 			})
 			.addTo(this.map)
 			.on('mouseover', this.handleHoverOverStreet)
 			.on('click', function (e) {
-				event.handleClickOnStreet(e.layer.feature);
+				events.handleClickOnStreet(e.layer.feature);
 			});
 
 		},
 		setCurrentView: function (lat, lng) {
-			this.map.setView([lat, lng], 16);
+			this.map.setView([lat, lng], 17);
 		},
 		handleHoverOverStreet: function (e) {
+			var point = L.point(0, -5);
+
 			L.popup({
-				closeButton: false
+				closeButton: false,
+				offset: point
 			})
 				.setLatLng(e.latlng)
 				.setContent(e.layer.feature.properties.streetName)
     		.openOn(map.map);
+		},
+		highlightStreet: function (slug) {
+			var path = document.querySelectorAll('path');
+
+			path.forEach(function (item) {
+				if (item.classList.contains('active')) item.classList.remove('active');
+				if (item.classList.contains(slug)) item.classList.add('active');
+			});
 		}
 	};
 
-	var search = {
-		searchbar: {
-			el: document.querySelector('.search input'),
+	var options = {
+		main: {
+			el: document.querySelector('.options'),
 			show: function () {
 				this.el.classList.add('show');
 			}
 		},
-		searchResults: {
-			el: document.querySelector('.results')
+		title: {
+			el: document.querySelector('#street-name'),
+			addStreetName: function (streetName) {
+				this.el.textContent = streetName;
+			}
 		},
-		init: function (data) {
-			var self = this;
+		search: {
+			searchbar: {
+				el: document.querySelector('input[name="searchbar"]')
+			},
+			currentFocus: 0,
+			init: function (data) {
+				var self = this;
 
-			this.searchbar.el.addEventListener('input', function (e) {
-				e.preventDefault();
-				imagesContainer.container.hide();
-				self.getSearchResults(data, this.value);
-			}, false);
-		},
-		getSearchResults: function (data, value) {
-			if (value.length > 1) {
+				// Event listener for input value:
+				this.searchbar.el.addEventListener('input', function (e) {
+					self.closeAllLists();
+					if (!this.value) return false;
+					self.currentFocus = -1;
+					options.imagesContainer.container.hide();
+					self.getAutocomplete(data, this.value);
+				}, false);
 
-				var results = data.filter(function (item) {
-					// Check if item.properties.streetName starts with the input value:
-					if (item.properties.streetName.toLowerCase().includes(value.toLowerCase())) {
-						return item;
+				// Event listener for pressing up or down key:
+				this.searchbar.el.addEventListener('keydown', function (e) {
+
+					var x = document.getElementById(this.id + 'autocomplete-list');
+
+					if (x) x = x.querySelectorAll('li');
+
+					if (e.keyCode == 40) {
+						self.currentFocus++;
+						self.addActive(x);
+					} else if (e.keyCode == 38) {
+						self.currentFocus--;
+						self.addActive(x);
+					} else if (e.keyCode == 13) {
+						e.preventDefault();
+						if (self.currentFocus > -1) {
+							if (x) x[self.currentFocus].children[0].click();
+						}
+					}
+
+				}, false);
+
+				// Event listener when clicking the document:
+				document.addEventListener('click', function (e) {
+					self.closeAllLists(e.target);
+				}, false);
+			},
+			getAutocomplete: function (data, val) {
+
+				var results = data.filter(function (street) {
+					if (street.properties.streetName.substr(0, val.length).toUpperCase() == val.toUpperCase()) {
+						return street;
 					}
 				});
 
-				this.setSearchResults(results);
+				this.setAutocomplete(results);
 
-			} else {
-				this.searchResults.el.innerHTML = '';
-			}
-		},
-		setSearchResults: function (results) {
-			var self = this;
-			this.searchResults.el.innerHTML = '';
+			},
+			setAutocomplete: function (results) {
+				var self = this;
 
-			if (results.length === 0) {
-				var li = document.createElement('LI');
+				var ul = document.createElement('UL');
 
-				li.textContent = 'Geen resultaten gevonden.';
+				ul.setAttribute('id', this.searchbar.el.id + 'autocomplete-list');
+				ul.setAttribute('class', 'autocomplete-items');
 
-				this.searchResults.el.appendChild(li);
-			} else {
+				this.searchbar.el.parentNode.appendChild(ul);
+
 				results.forEach(function (result, i) {
 					if (i < 2) {
+						
 						var li = document.createElement('LI');
 						var a = document.createElement('A');
+
+						li.appendChild(a);
 
 						a.textContent = result.properties.streetName;
 						a.href = result.properties.link;
 
-						self.searchResults.el.appendChild(li);
-						li.appendChild(a);
-
 						a.addEventListener('click', function (e) {
+							
 							e.preventDefault();
-							self.searchbar.el.value = '';
-							self.searchResults.el.innerHTML = '';
-							event.handleClickOnStreet(result);
+
+							self.searchbar.el.value = this.textContent;
+
+							self.closeAllLists();
+							events.handleClickOnStreet(result);
+
 						}, false);
+
+						ul.appendChild(li);
+
 					}
 				});
-			}
-		}
-	};
 
-	// [!] Find better object name:
-	var event = {
-		handleClickOnStreet: function (street) {
-			var latlng;
-
-			if (street.geometry.type === 'Point') {
-				latlng = street.geometry.coordinates;
-			} else {
-				latlng = street.geometry.coordinates[0][0];
-			}
-
-			map.setCurrentView(latlng[1], latlng[0]);
-			api.getStreetDetails(street.properties.link);
-			title.show();
-			title.addStreetName(street.properties.streetName);
-		}
-	};
-
-	var timeline = {
-		el: document.querySelector('.timeline'),
-		addCurrentYears: function (years) {
-			var self = this;
-			this.el.innerHTML = '';
-
-			var yearsInBetween = Number(years[years.length - 1].year) - Number(years[0].year) + 1;
-			var yearWidth = 100 / yearsInBetween;
-
-			years.forEach(function (item, i) {
-				var li = document.createElement('LI');
-				var span = document.createElement('SPAN');
-
-				li.style.width = 'calc(' + yearWidth + '% - 2px)';
-				li.style.left = ((Number(item.year) - Number(years[0].year)) * yearWidth) + '%';
-
-				span.textContent = item.year;
-				
-				self.el.appendChild(li);
-				li.appendChild(span);
-
-				li.addEventListener('click', function () {
-					imagesContainer.container.show();
-					imagesContainer.addImages(item);
-				}, false);
-			});
-		}
-	};
-
-	var imagesContainer = {
-		container: {
-			el: document.querySelector('.images--container'),
-			show: function () {
-				this.el.classList.add('show');
 			},
-			hide: function () {
-				this.el.classList.remove('show');
+			addActive: function (x) {
+
+				if (!x) return false;
+
+				this.removeActive(x);
+
+				if (this.currentFocus >= x.length) this.currentFocus = 0;
+				if (this.currentFocus < 0) this.currentFocus = (x.length - 1);
+
+				x[this.currentFocus].children[0].classList.add('autocomplete-active');
+
+			},
+			removeActive: function (x) {
+				
+				for (var i = 0; i < x.length; i++) {
+					x[i].children[0].classList.remove('autocomplete-active');
+				}
+
+			},
+			closeAllLists: function (el) {
+
+				var x = document.querySelectorAll('.autocomplete-items');
+
+				for (var i = 0; i < x.length; i++) {
+					
+					if (el != x[i] && el != this.searchbar.el) {
+						x[i].parentNode.removeChild(x[i]);
+					}
+
+				}
+
 			}
 		},
-		imageList: {
-			el: document.querySelector('.images--container ul'),
+		timeline: {
+			container: {
+				el: document.querySelector('.timeline--container'),
+				show: function () {
+					this.el.classList.add('show');
+				}
+			},
+			timeline: {
+				el: document.querySelector('.timeline')
+			},
+			addCurrentYears: function (years) {
+				var self = this;
+
+				this.timeline.el.innerHTML = '';
+
+				var yearsInBetween = Number(years[years.length - 1].year) - Number(years[0].year) + 1;
+				var yearWidth = 100 / yearsInBetween;
+
+				years.forEach(function (item, i) {
+					var li = document.createElement('LI');
+					var a = document.createElement('A');
+					var span = document.createElement('SPAN');
+
+					li.style.left = ((Number(item.year) - Number(years[0].year)) * yearWidth) + '%';
+
+					a.href = '#';
+
+					span.textContent = item.year;
+					
+					self.timeline.el.appendChild(li);
+					li.appendChild(a);
+					a.appendChild(span);
+
+					a.addEventListener('click', function (e) {
+						e.preventDefault();
+						options.imagesContainer.container.show();
+						options.imagesContainer.addImages(item);
+					}, false);
+				});
+			}
 		},
-		closeBtn: {
-			el: document.querySelector('.close-btn')
-		},
-		addImages: function (year) {
-			var self = this;
-			this.imageList.el.innerHTML = '';
+		imagesContainer: {
+			container: {
+				el: document.querySelector('.images--container'),
+				show: function () {
+					this.el.classList.add('show');
+				},
+				hide: function () {
+					this.el.classList.remove('show');
+				}
+			},
+			imageList: {
+				el: document.querySelector('.images--container ul'),
+			},
+			closeBtn: {
+				el: document.querySelector('.close-btn')
+			},
+			addImages: function (year) {
+				var self = this;
+				this.imageList.el.innerHTML = '';
 
-			year.images.forEach(function (image) {
-				var li = document.createElement('LI');
-				var img = document.createElement('IMG')
+				year.images.forEach(function (image) {
+					var li = document.createElement('LI');
+					var img = document.createElement('IMG')
 
-				img.src = image.value;
+					img.src = image.value;
 
-				self.imageList.el.appendChild(li);
-				li.appendChild(img);
-			});
+					self.imageList.el.appendChild(li);
+					li.appendChild(img);
+				});
 
-			this.closeBtn.el.addEventListener('click', function () {
-				self.container.hide();
-			}, false);
-		}
-	};
-
-	var title = {
-		el: document.querySelector('#street-name'),
-		show: function () {
-			this.el.classList.add('show');
-		},
-		addStreetName: function (streetName) {
-			this.el.textContent = streetName;
+				this.closeBtn.el.addEventListener('click', function () {
+					self.container.hide();
+				}, false);
+			}
 		}
 	};
 
